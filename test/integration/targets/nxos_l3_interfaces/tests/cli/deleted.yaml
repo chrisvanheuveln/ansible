@@ -36,7 +36,6 @@
         - "result.changed == true"
         - "'interface {{ test_int1 }}' in result.commands"
         - "'no ip address' in result.commands"
-        - "result.commands|length == 2"
 
   - name: Idempotence - deleted
     nxos_l3_interfaces: *deleted
