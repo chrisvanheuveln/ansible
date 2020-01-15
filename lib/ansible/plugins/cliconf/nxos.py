@@ -105,6 +105,8 @@ class Cliconf(CliconfBase):
         if match_os_platform:
             device_info['network_os_platform'] = match_os_platform.group(1)
 
+        device_info['remote_host'] = self._connection.get_option('host')
+
         return device_info
 
     def get_diff(self, candidate=None, running=None, diff_match='line', diff_ignore_lines=None, path=None, diff_replace='line'):

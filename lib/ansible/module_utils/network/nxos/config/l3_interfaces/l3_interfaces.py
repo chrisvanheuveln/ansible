@@ -15,11 +15,13 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 import re
+import socket
 
 from copy import deepcopy
 from ansible.module_utils.network.common.cfg.base import ConfigBase
 from ansible.module_utils.network.common.utils import to_list, remove_empties
 from ansible.module_utils.network.nxos.facts.facts import Facts
+from ansible.module_utils.network.nxos.nxos import get_capabilities
 from ansible.module_utils.network.nxos.utils.utils import normalize_interface, search_obj_in_list
 from ansible.module_utils.network.nxos.utils.utils import remove_rsvd_interfaces, get_interface_type
 
@@ -56,7 +58,8 @@ class L3_interfaces(ConfigBase):
             return []
 
         self.platform = self.get_platform_type()
-        return remove_rsvd_interfaces(l3_interfaces_facts)
+        # return remove_rsvd_interfaces(l3_interfaces_facts)
+        return l3_interfaces_facts
 
     def get_platform_type(self):
         default, _warnings = Facts(self._module).get_facts(legacy_facts_type=['default'])
@@ -105,8 +108,9 @@ class L3_interfaces(ConfigBase):
         if config:
             for w in config:
                 w.update({'name': normalize_interface(w['name'])})
-                if get_interface_type(w['name']) == 'management':
-                    self._module.fail_json(msg="The 'management' interface is not allowed to be managed by this module")
+                # if get_interface_type(w['name']) == 'management': ### REMOVE THIS CHECK
+                    # self._module.fail_json(msg="The 'management' interface is not allowed to be managed by this module")
+                    # import epdb;epdb.serve()
                 want.append(remove_empties(w))
         have = deepcopy(existing_l3_interfaces_facts)
         self.init_check_existing(have)
@@ -126,6 +130,8 @@ class L3_interfaces(ConfigBase):
         if state in ('overridden', 'merged', 'replaced') and not want:
             self._module.fail_json(msg='config is required for state {0}'.format(state))
 
+        self.get_session_intf(want, have)
+
         commands = list()
         if state == 'overridden':
             commands.extend(self._state_overridden(want, have))
@@ -138,6 +144,33 @@ class L3_interfaces(ConfigBase):
                 elif state == 'replaced':
                     commands.extend(self._state_replaced(w, have))
         return commands
+
+    def get_session_intf(self, want, have):
+        """Get the IP address used by the ansible session to determine the mgmt interface.
+        This is used to help prevent overwriting a management interface IP.
+        """
+        session_intf = None
+        session_ip = get_capabilities(self._module).get('device_info', {}).get('remote_host', '')
+        try:
+            if session_ip:
+                session_ip = socket.gethostbyname(session_ip)
+        except:
+            pass
+
+        # used by delete-without-config or overridden-and-session-ip-intf-not-specified
+        # BASIC IDEA IS TO SEE IF ANY CURRENT INTF IS USING THE IP WE LOGGED IN WITH
+        # PROB IS THAT A VRF COULD HAVE THE SAME ADDR, SO JUST USED MGMT FOR NOW.
+        if session_ip:
+            for intf in have:
+                # limit this check to management types for now
+                if get_interface_type(intf['name']) == 'management':
+                    ipv4 = intf.get('ipv4', [])
+                    if [i for i in ipv4 if i.get('address', '').split('/')[0] == session_ip]:
+                        session_intf = intf['name']
+                        break
+        self.session_ip = session_ip
+        self.session_intf = session_intf
+        import epdb;epdb.serve()
 
     def _state_replaced(self, want, have):
         """ The command generator when state is replaced
@@ -197,6 +230,8 @@ class L3_interfaces(ConfigBase):
                     self.cmd_order_fixup(replaced_cmds, obj_in_want['name'])
                     cmds.extend(replaced_cmds)
             else:
+                # NEED TO CHECK FOR MGMT INTF HERE
+                # if i['name'] == self.session_intf
                 deleted_cmds = self.generate_delete_commands(i)
                 self.cmd_order_fixup(deleted_cmds, i['name'])
                 cmds.extend(deleted_cmds)
@@ -342,6 +377,8 @@ class L3_interfaces(ConfigBase):
             if not have:
                 return commands
             for h in have:
+                # NEED TO CHECK FOR MGMT HERE
+                # if h['name'] == self.session_intf
                 commands.extend(self.del_all_attribs(h))
         return commands
 

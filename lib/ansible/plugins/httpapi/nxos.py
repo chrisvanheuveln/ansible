@@ -142,6 +142,8 @@ class HttpApi(HttpApiBase):
         if match_os_platform:
             device_info['network_os_platform'] = match_os_platform.group(1)
 
+        device_info['remote_host'] = self.connection.get_option('host')
+
         self._device_info = device_info
         return self._device_info
 
